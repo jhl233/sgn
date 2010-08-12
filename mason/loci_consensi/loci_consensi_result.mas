@@ -1,0 +1,250 @@
+
+<& /util/import_javascript.mas, classes=>["CXGN.Effects"] &>
+
+<%doc>
+
+=head1 NAME
+
+/locus/loci_consensi_result.mas - a page to show consensus and sequence alignment images
+
+=head1 DESCRIPTION
+
+parameters:
+
+=over 3
+
+=item $locus_id
+
+The id of the locus in the database
+
+=item $locus_accession
+
+The Genbank accession of the locus
+
+=item $phenome_schema
+
+Connects to the phenome schema in the database
+
+=item $sgn_schema
+ 
+Connects to the sgn schema in the database
+
+
+
+=back
+
+=head1 AUTHOR
+
+Jean Hooi Lee <jhl233@cornell.edu>
+
+=cut
+
+</%doc>
+
+
+
+<%args>
+
+$locus_id
+$locus_accession
+$phenome_schema
+$sgn_schema
+
+</%args>
+
+
+
+<%perl>
+
+
+use CXGN::Phylo::Alignment;
+use SGN::Context;
+use File::Temp;
+use File::Slurp;
+
+use FileHandle;
+use Fcntl; # For O_RDWR, O_CREAT, etc.
+use DB_File;
+
+
+#---access multi-fasta file from web file system---
+
+my $fasta_file = '/data/prod/public/loci/loci2_out_multi.fasta';
+
+
+#---check if locus_id matches a tomato locus---
+
+$common_name_id = $sgn_schema->resultset('CommonName')
+                             ->find({common_name => {'like' => '%Tomato%'}})
+                             ->get_column('common_name_id');
+
+$locus_common_name_id = $phenome_schema->resultset('Locus')
+                                       ->find({locus_id => $locus_id})
+                                       ->get_column('common_name_id');
+
+if ($common_name_id != $locus_common_name_id){
+
+    print "No image exists for this locus.";
+
+}
+ 
+else {
+    
+#---create web temp files---
+
+my $c = SGN::Context->new();
+
+# temporarily stores index file - will only be needed to be created the first time the web page is visited
+my $temp_file = $c->tempfile(TEMPLATE => 'loci_consensi_result/loci_seq-XXXXXX');
+
+# temporarily stores loci sequences
+my $temp_seq = $c->tempfile(TEMPLATE => 'loci_consensi_result/loci_seq-XXXXXX');
+
+# temporarily stores the locus image
+my $temp_img = $c->tempfile(TEMPLATE => 'loci_consensi_result/loci_img-XXXXXX',
+			    SUFFIX => '.png'
+                           );
+
+
+#---create index file---
+
+my $index_hash = &build_index_file($input, $temp_file);
+
+
+#---find the sequences for the desired locus---
+
+while ( my($key, $value) = each(%$index_hash) ){
+
+}
+
+#---search for the aligned sequences for this specific locus---
+
+#my @lines = read_file( $fasta_file );
+
+
+#---find the sequences for the desired locus---
+
+
+#---store sequences in temp file---
+
+write_file( $temp_seq, @sequences );
+
+
+#---create new Alignment object---
+
+my $alignment = CXGN::Phylo::Alignment->new(
+                                        name => 'Sequence Alignment',
+                                        type => 'nt'
+                                        );
+
+
+#---create alignment image for specific locus and store in temp file---
+
+my $temp_img = $alignment->render_png_file($temp_seq);
+
+}
+
+
+</%perl>
+
+
+
+
+% #---show online - add hyperlink to image that connects to alignment viewer---
+
+<a href="http://sgn.localhost.localdomain/tools/align_viewer/show_align.pl?&type=nt&seq_data=<% $seq_temp %>"><img src=<% $img_temp %> alt="Image of Aligned Sequences" /></a>
+
+
+
+<%perl>
+
+### creates an index file full of byte locations
+sub build_index_file {
+
+    my ($self, $input_file, $temp_file) = @_;
+    my $contig_id = "";
+    my $offset = 0;
+
+    my ($data_handle, $index_handle) = FileHandle->new();
+    if (-f $index_file){
+	tie (my %index_hash,'DB_File', "$temp_file", O_RDONLY, 0777)
+	    or die "Could not tie DB file $temp_file: $!; aborting";
+	
+	return \%index_hash;
+    }
+    else {
+	$data_handle->open("<$input_file") or die "Cannot open data handle: $!\n";
+	
+	tie (my %index_hash, 'DB_File', "$temp_file", O_CREAT|O_WRONLY, 0777)
+	    or die "Could not tie DB file $temp_file: $!; aborting";
+        
+	while ( <$temp_file> ){
+	    if ($_ =~ /(\w+)/) {
+		$contig_id = $1;
+		$index_hash{$contig_id} = $offset;
+	    }
+	    $offset = tell($data_handle);
+	}
+	return \%index_hash;
+    }
+}
+
+### NOT COMPLETE - SUPPOSED TO HELP GET CONTIG_ID
+sub get_contig_id {
+
+    my ($self, $locus_id, $locus_accession, $index_hash) = @_;
+    if (exists $locus{"SGN-L".$locus_id.$locus_accession})
+	
+    }
+    
+    return tell($byte_location);
+}
+
+### finds all the reads and sequence information related to one contig
+sub get_contig_info {
+    my ($self, $input_file, $contig_id, $byte_location) = @_;
+    my $data_handle = FileHandle->new();
+    my %locus = {};
+    my $end = "false";
+    my $read_id = "";
+    my $identifier = "contig";
+
+    $data_handle->open("<$input_file") or die "Cannot open data handle: $!\n";
+    seek($data_handle, $byte_location, 0);
+
+    ### get contig ids, read ids, and their sequences
+    while ( defined(fileno($data_handle)) ){
+	my $line = <$data_handle>;
+
+	if (!eof($data_handle)){
+	    # stop reading once new contig has been reached
+	    if ($line =~ /(\w+)/){
+		if ($contig eq $1){
+		    last;
+		}
+	    }
+	    # get contig sequence
+	    if ($line =~ /[ATCG]+/ && $identifier eq "contig"){
+		%locus{$contig_id} = $line;
+	    }
+
+	    # get read_id
+	    if ($line =~ /(SGN-L[\w-]+)/ || $line =~ /(SGN-U[\w-]+)/){
+		$read_id = $1;
+		$identifier = "read";
+		$end = "false";
+	    }
+
+	    # get read sequence
+	    if ($line =~ /[ATCG]+/ && $identifier eq "read"){
+		%locus{$read_id} = $line;
+	    }
+	}
+    }
+}
+
+<%perl>
+
+#---add cron job---
+
+</%perl>
